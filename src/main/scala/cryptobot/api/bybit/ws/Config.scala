@@ -1,6 +1,6 @@
 package cryptobot.api.bybit.ws
 
-import zio.{ ZIO, URIO, ZLayer, Layer, Duration }
+import zio.{ ZIO, URIO, IO, ZLayer, Layer, Duration }
 import zio.config.read
 import zio.config.{ ReadError, Interpolator }
 import zio.config.typesafe.TypesafeConfigSource
@@ -8,7 +8,8 @@ import zio.config.magnolia.descriptor
 
 final case class Config(
   reconnectInterval: Duration,
-  pingInterval     : Duration
+  pingInterval     : Duration,
+  reconnectTries   : Int
 )
 
 object Config:
@@ -20,4 +21,13 @@ object Config:
     )
 
   val reconnectInterval: URIO[Config, Duration] = ZIO.serviceWith(_.reconnectInterval)
-  val pingInterval:      URIO[Config, Duration] = ZIO.serviceWith(_.pingInterval)
+  val pingInterval     : URIO[Config, Duration] = ZIO.serviceWith(_.pingInterval)
+  val reconnectTries   : URIO[Config, Int]      = ZIO.serviceWith(_.reconnectTries)
+
+  val getConfig: IO[ReadError[String], Config] =
+    (for
+      reconnectInterval <- Config.reconnectInterval
+      pingInterval      <- Config.pingInterval
+      reconnectTries    <- Config.reconnectTries
+    yield Config(reconnectInterval, pingInterval, reconnectTries))
+      .provideLayer(Config.layer)

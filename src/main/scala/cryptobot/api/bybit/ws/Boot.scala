@@ -69,25 +69,23 @@ object Boot extends ZIOAppDefault:
     }
 
   // Maybe later change from Promise to Ref or ZState, creater a counter as a Ref describing cumulate connection retries
-  private val inverseSocketApp: ZIO[SocketEnv, ReadError[String], Unit] =
-    ((for
-      reconnectInterval <- Config.reconnectInterval
-      pingInterval      <- Config.pingInterval
+  private def inverseSocketApp(config: Config): ZIO[SocketEnv, ReadError[String], Unit] =
+    (for
       pConn             <- Promise.make[Nothing, Throwable]
-      _                 <- makeInverseSocketApp(pingInterval).connect(MarketType.InverseWssPath).catchAll(pConn.succeed)
+      _                 <- makeInverseSocketApp(config.pingInterval).connect(MarketType.InverseWssPath).catchAll(pConn.succeed)
       connFail          <- pConn.await
       _                 <- ZIO.logError(s"Bybit ws connection for inverse market type failed: $connFail")
       _                 <- ZIO.logError("Trying to reconnect...")
-      _                 <- ZIO.sleep(reconnectInterval)
-    yield ()) *> inverseSocketApp)
-      .provideSomeLayer[SocketEnv](Config.layer)
+      _                 <- ZIO.sleep(config.reconnectInterval)
+    yield ()) *> inverseSocketApp(config)
 
   override def run: UIO[ExitCode] =
     ZIO.scoped(
       for
-        _ <- Console.printLine(s"Starting the application").orDie
-        _ <- inverseSocketApp.forkScoped
-        _ <- Console.readLine("Press ENTER to stop the application\n").orDie *> Console.printLine("Stopping the application...")
+        _      <- Console.printLine(s"Starting the application").orDie
+        config <- Config.getConfig
+        _      <- inverseSocketApp(config).forkScoped
+        _      <- Console.readLine("Press ENTER to stop the application\n").orDie *> Console.printLine("Stopping the application...")
       yield ()
     )
     .provide(
