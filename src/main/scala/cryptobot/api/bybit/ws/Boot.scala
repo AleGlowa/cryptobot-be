@@ -1,7 +1,6 @@
 package cryptobot.api.bybit.ws
 
 import zio.*
-import zio.config.ReadError
 import zio.json.DecoderOps
 import zio.json.ast.{ Json, JsonCursor }
 import zhttp.http.*
@@ -13,7 +12,6 @@ import java.net.SocketTimeoutException
 
 import cryptobot.api.Exchange.ByBit
 import cryptobot.api.bybit.MarketType
-import cryptobot.api.bybit.ws.Config
 
 object Boot extends ZIOAppDefault:
 
@@ -68,24 +66,42 @@ object Boot extends ZIOAppDefault:
         ZIO.fail(new RuntimeException("Got a non-text response"))
     }
 
-  // Maybe later change from Promise to Ref or ZState, creater a counter as a Ref describing cumulate connection retries
-  private def inverseSocketApp(config: Config): ZIO[SocketEnv, ReadError[String], Unit] =
-    (for
-      pConn             <- Promise.make[Nothing, Throwable]
-      _                 <- makeInverseSocketApp(config.pingInterval).connect(MarketType.InverseWssPath).catchAll(pConn.succeed)
-      connFail          <- pConn.await
-      _                 <- ZIO.logError(s"Bybit ws connection for inverse market type failed: $connFail")
-      _                 <- ZIO.logError("Trying to reconnect...")
-      _                 <- ZIO.sleep(config.reconnectInterval)
-    yield ()) *> inverseSocketApp(config)
+  private def checkReconnectTries(reconnectsNum: Int, reconnectTries: Int) =
+    if reconnectsNum >= reconnectTries then
+      ZIO.die(new RuntimeException("Cumulative reconnection attempts've reached the maximum"))
+    else
+      ZIO.unit
 
+  private def inverseSocketApp(config: Config, reconnectsNumR: => Ref[Int]): RIO[SocketEnv, Unit] =
+    ((for
+      pConn         <- Promise.make[Nothing, Throwable]
+      _             <-
+        makeInverseSocketApp(config.pingInterval)
+          .connect(MarketType.InverseWssPath)
+          .tap(_ => reconnectsNumR.set(0))
+          .catchAll(pConn.succeed)
+      connFail      <- pConn.await
+      _             <- ZIO.logError(s"Bybit ws connection for inverse market type failed: $connFail")
+      _             <- ZIO.logError("Trying to reconnect...")
+      _             <- ZIO.sleep(config.reconnectInterval)
+      reconnectsNum <- reconnectsNumR.updateAndGet(_ + 1)
+      _             <- checkReconnectTries(reconnectsNum, config.reconnectTries)
+    yield ()) *> inverseSocketApp(config, reconnectsNumR))
+      .tapDefect ( defect =>
+        Console.printLineError(s"Got a defect from inverse socket app: ${defect.dieOption.get}")
+      )
+
+  // When `inverseSocketApp` is dead or interrupted we still need to press ENTER to stop the application.
   override def run: UIO[ExitCode] =
     ZIO.scoped(
       for
-        _      <- Console.printLine(s"Starting the application").orDie
-        config <- Config.getConfig
-        _      <- inverseSocketApp(config).forkScoped
-        _      <- Console.readLine("Press ENTER to stop the application\n").orDie *> Console.printLine("Stopping the application...")
+        _              <- Console.printLine(s"Starting the application").orDie
+        reconnectsNumR <- Ref.make(0)
+        config         <- Config.getConfig
+        _              <- inverseSocketApp(config, reconnectsNumR).forkScoped
+        _              <-
+          Console.readLine("Press ENTER to stop the application\n").orDie *>
+            Console.printLine("Stopping the application...")
       yield ()
     )
     .provide(
@@ -94,21 +110,3 @@ object Boot extends ZIOAppDefault:
       ChannelFactory.nio
     )
     .exitCode
-
-  // private val httpApp = Http.collectZIO[Request] {
-  //   case Method.GET -> !! / ByBit.name / "inverseWs" => inverseSocketApp.connect(MarketType.InverseWssPath)
-  // } @@ Middleware.debug
-
-  // override def run: UIO[ExitCode] =
-  //   ZIO.scoped(
-  //     for
-  //       _ <- Console.printLine(s"Starting server on http://localhost:$Port").orDie
-  //       _ <- Server.start(Port, httpApp).forkScoped
-  //       _ <- Console.readLine("Press ENTER to stop the server\n").orDie *> Console.printLine("Closing the server connection...")
-  //     yield ()
-  //   )
-  //   .provide(
-  //     EventLoopGroup.default,
-  //     ChannelFactory.nio
-  //   )
-  //   .exitCode
