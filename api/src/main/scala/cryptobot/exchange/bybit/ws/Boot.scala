@@ -1,4 +1,4 @@
-package cryptobot.api.bybit.ws
+package cryptobot.exchange.bybit.ws
 
 import zio.*
 import zio.json.DecoderOps
@@ -10,8 +10,7 @@ import zhttp.socket.{ SocketApp, WebSocketFrame }
 
 import java.net.SocketTimeoutException
 
-import cryptobot.api.Exchange.ByBit
-import cryptobot.api.bybit.MarketType
+import cryptobot.exchange.bybit.MarketType
 
 object Boot extends ZIOAppDefault:
 
