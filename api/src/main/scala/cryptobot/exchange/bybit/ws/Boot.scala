@@ -51,7 +51,7 @@ object Boot extends ZIOAppDefault:
                   fieldNotFound   => ZIO.fail(new RuntimeException(fieldNotFound)),
                   isSuccess       =>
                     if isSuccess then
-                      ZIO.logInfo("Got a pong") *> ZIO.sleep(pingInterval) *> ch.writeAndFlush(WebSocketFrame.Text("""{"op": "ping"}"""))
+                      ZIO.sleep(pingInterval) *> ch.writeAndFlush(WebSocketFrame.Text("""{"op": "ping"}"""))
                     else
                       ZIO.fail(new RuntimeException("Unseccussful ping request"))
                 )
