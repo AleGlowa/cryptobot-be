@@ -1,4 +1,4 @@
-package cryptobot.api.bybit.ws
+package cryptobot.exchange.bybit.ws
 
 import zio.{ ZIO, URIO, IO, ZLayer, Layer, Duration }
 import zio.config.read
@@ -16,7 +16,7 @@ object Config:
   val layer: Layer[ReadError[String], Config] =
     ZLayer(
       read(
-        descriptor[Config] from TypesafeConfigSource.fromResourcePath.at(path"api.bybit.ws")
+        descriptor[Config] from TypesafeConfigSource.fromResourcePath.at(path"bybit.ws")
       )
     )
 

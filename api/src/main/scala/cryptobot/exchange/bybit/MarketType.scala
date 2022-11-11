@@ -1,4 +1,4 @@
-package cryptobot.api.bybit
+package cryptobot.exchange.bybit
 
 /**
  * References:
