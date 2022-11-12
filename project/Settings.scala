@@ -5,7 +5,7 @@ import Dependencies.*
 
 object Settings {
 
-  val CommonSettings =
+  val CoreSettings =
     Seq(
       scalacOptions :=
         Seq(
@@ -16,14 +16,16 @@ object Settings {
       run / cancelable := true  // https://github.com/sbt/sbt/issues/2274
     )
 
-  val CommonDependencies = Zio :: Nil
+  val CoreDependencies =
+    Zio ::
+      ZioConfig ::
+      ZioConfigTypesafe ::
+      ZioConfigMagnolia ::
+      Nil
 
   val ApiDependencies =
     ZioHttp ::
       ZioJson ::
-      ZioConfig ::
-      ZioConfigTypesafe ::
-      ZioConfigMagnolia ::
       ZioHttpTest ::
       Nil
 

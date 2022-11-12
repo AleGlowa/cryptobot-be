@@ -10,6 +10,7 @@ import zhttp.socket.{ SocketApp, WebSocketFrame }
 
 import java.net.SocketTimeoutException
 
+import cryptobot.config.{ Config, WsConfig }
 import cryptobot.exchange.bybit.MarketType
 
 object Boot extends ZIOAppDefault:
@@ -65,13 +66,21 @@ object Boot extends ZIOAppDefault:
         ZIO.fail(new RuntimeException("Got a non-text response"))
     }
 
+  private val wsConfig =
+    (for
+      reconnectInterval <- WsConfig.reconnectInterval
+      pingInterval      <- WsConfig.pingInterval
+      reconnectTries    <- WsConfig.reconnectTries
+    yield WsConfig(reconnectInterval, pingInterval, reconnectTries))
+      .provideLayer(Config.ws)
+
   private def checkReconnectTries(reconnectsNum: Int, reconnectTries: Int) =
     if reconnectsNum >= reconnectTries then
       ZIO.die(new RuntimeException("Cumulative reconnection attempts've reached the maximum"))
     else
       ZIO.unit
 
-  private def inverseSocketApp(config: Config, reconnectsNumR: => Ref[Int]): RIO[SocketEnv, Unit] =
+  private def inverseSocketApp(config: WsConfig, reconnectsNumR: => Ref[Int]): RIO[SocketEnv, Unit] =
     ((for
       pConn         <- Promise.make[Nothing, Throwable]
       _             <-
@@ -95,8 +104,8 @@ object Boot extends ZIOAppDefault:
     ZIO.scoped(
       for
         _              <- Console.printLine(s"Starting the application").orDie
+        config         <- wsConfig
         reconnectsNumR <- Ref.make(0)
-        config         <- Config.getConfig
         _              <- inverseSocketApp(config, reconnectsNumR).forkScoped
         _              <-
           Console.readLine("Press ENTER to stop the application\n").orDie *>
