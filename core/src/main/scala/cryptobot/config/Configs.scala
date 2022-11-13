@@ -25,7 +25,6 @@ final case class WsConfig(
   reconnectTries   : Int
 ) extends Config
 
-
 object WsConfig:
 
   val reconnectInterval: URIO[WsConfig, Duration] = ZIO.serviceWith(_.reconnectInterval)
@@ -33,3 +32,9 @@ object WsConfig:
   val reconnectTries   : URIO[WsConfig, Int]      = ZIO.serviceWith(_.reconnectTries)
 
 end WsConfig
+
+
+final case class WsConnConfig(
+  reconnectInterval: Duration,
+  reconnectTries   : Int
+) extends Config
