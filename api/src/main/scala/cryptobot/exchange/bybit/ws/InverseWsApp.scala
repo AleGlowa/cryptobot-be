@@ -33,3 +33,13 @@ class InverseWsApp(config: WsConnConfig, msgLogic: SocketApp[Any]) extends WsApp
       .tapDefect ( defect =>
         Console.printLineError(s"Got a defect from inverse socket app: ${defect.dieOption.get}")
       )
+
+object InverseWsApp:
+
+  val start =
+    ZIO.serviceWithZIO[InverseWsApp] ( app =>
+      for
+        reconnectsNumR <- Ref.make(0)
+        _              <- app.connect(reconnectsNumR)
+      yield ()
+    ).forkScoped

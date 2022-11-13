@@ -1,10 +1,9 @@
 package cryptobot.exchange.bybit.ws
 
-import zio.{ ZIOAppDefault, UIO, ZIO, ExitCode, Console, Ref }
+import zio.{ ZIOAppDefault, UIO, ZIO, ExitCode, Console }
 import zhttp.service.{ EventLoopGroup, ChannelFactory }
 
-import cryptobot.config.{ Config, WsConfig }
-import cryptobot.exchange.bybit.MarketType
+import cryptobot.config.Config
 
 object Boot extends ZIOAppDefault:
 
@@ -13,9 +12,7 @@ object Boot extends ZIOAppDefault:
     ZIO.scoped(
       for
         _              <- Console.printLine(s"Starting the application").orDie
-        inverseWsApp   <- ZIO.service[InverseWsApp]
-        reconnectsNumR <- Ref.make(0)
-        _              <- inverseWsApp.connect(reconnectsNumR).forkScoped
+        _              <- InverseWsApp.start
         _              <-
           Console.readLine("Press ENTER to stop the application\n").orDie *>
             Console.printLine("Stopping the application...")
