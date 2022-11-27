@@ -11,9 +11,9 @@ object Boot extends ZIOAppDefault:
   override def run: UIO[ExitCode] =
     ZIO.scoped(
       for
-        _              <- Console.printLine(s"Starting the application").orDie
-        _              <- InverseWsApp.start
-        _              <-
+        _ <- Console.printLine(s"Starting the application").orDie
+        _ <- InverseWsApp.start
+        _ <-
           Console.readLine("Press ENTER to stop the application\n").orDie *>
             Console.printLine("Stopping the application...")
       yield ()
