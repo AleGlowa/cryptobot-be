@@ -42,7 +42,8 @@ object InverseWsAppSpec extends ZIOSpecDefault:
         .provide(
           EventLoopGroup.nio(nThreads = 4),
           ChannelFactory.nio,
-          Config.ws
+          Config.ws,
+          WsApp.initialState
         )
       )
     )
