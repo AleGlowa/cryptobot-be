@@ -7,14 +7,14 @@ import zhttp.service.ChannelEvent.UserEvent.HandshakeComplete
 import zhttp.socket.{ SocketApp, WebSocketFrame }
 
 import cryptobot.exchange.bybit.ws.InverseWsApp
-import cryptobot.config.WsConfig
+import cryptobot.exchange.bybit.ws.WsApp.SocketEnv
 
 final class TestInverseWsApp(
   msgCollector: MessageCollector[Event[WebSocketFrame]],
   isConnected : Ref[Boolean]
 ) extends InverseWsApp:
 
-    override def msgLogic: SocketApp[WsConfig] =
+    override def msgLogic: SocketApp[SocketEnv] =
       val logicWithoutCollector = super.msgLogic
       logicWithoutCollector.copy(
         message =
