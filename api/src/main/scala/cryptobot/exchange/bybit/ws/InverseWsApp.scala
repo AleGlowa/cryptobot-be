@@ -25,19 +25,19 @@ class InverseWsApp extends WsApp:
             ZIO.fail(new SocketTimeoutException())
           else
             for
-              _ <- updateIsConnected(true)
+              _ <- setIsConnected(true)
               _ <- ZIO.logInfo("Bybit ws connection for inverse market type has been opened")
               r <- ch.writeAndFlush(WebSocketFrame.text("""{"op": "ping"}"""))
             yield r
 
         case ChannelEvent(ch, ChannelEvent.ChannelRegistered) =>
-          ZIO.logInfo(s"Channel [id=${ch.id}] has been registered") *> updateChannel(Some(ch))
+          ZIO.logInfo(s"Channel [id=${ch.id}] has been registered") *> setChannel(Some(ch))
 
         case ChannelEvent(ch, ChannelEvent.ChannelUnregistered) =>
           for
-            _ <- updateIsConnected(false)
+            _ <- setIsConnected(false)
             _ <- ZIO.logInfo(s"Channel [id=${ch.id}] has been unregistered")
-            _ <- updateChannel(None)
+            _ <- setChannel(None)
           yield ()
 
         case ChannelEvent(_, ExceptionCaught(t)) =>
@@ -121,7 +121,7 @@ class InverseWsApp extends WsApp:
               .tap(_ => reconnectsNumR.set(0))
               .catchAll(connP.succeed)
           connFail      <- connP.await
-          _             <- updateIsConnected(false)
+          _             <- setIsConnected(false)
           _             <- ZIO.logError(s"Bybit ws connection for inverse market type failed: $connFail")
           _             <- ZIO.logError("Trying to reconnect...")
           reconnectsNum <- reconnectsNumR.updateAndGet(_ + 1)
