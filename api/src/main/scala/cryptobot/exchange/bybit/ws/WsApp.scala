@@ -19,35 +19,43 @@ trait WsApp:
 
   protected def msgLogic: SocketApp[SocketEnv]
 
-  def connect(): RIO[SocketEnv, Unit]
+  def connect()   : RIO[SocketEnv, Unit]
+  def disconnect(): RIO[SocketEnv, Unit] =
+    for
+      ch <- getChannel.flatMap(_.get)
+      _  <- ZIO.when(ch.nonEmpty)(ch.get.close(await = true))
+      _  <- setIsConnected(false)
+      _  <- setChannel(None)
+      _  <- ch.fold(ZIO.unit)(ch => ZIO.logInfo(s"Closing the connection with channel ${ch.id}"))
+    yield ()
 
   def subscribe(sub: => SubArg)  : RIO[SocketEnv, Unit]
   def unsubscribe(sub: => SubArg): RIO[SocketEnv, Unit]
 
-  /** `isConnected` - get & update */
+  /** `isConnected` - get & set */
   protected val getIsConnected: URIO[SocketEnv, Ref[Boolean]] =
     ZIO.getStateWith[WsState](_.isConnected)
 
-  protected def updateIsConnected(value: => Boolean): URIO[SocketEnv, Unit] =
+  protected def setIsConnected(value: => Boolean): URIO[SocketEnv, Unit] =
     for
-      isConnected <- getIsConnected
-      _           <- isConnected.set(value)
-      _           <- ZIO.updateState[WsState](_.copy(isConnected = isConnected))
+      isConn <- getIsConnected
+      _      <- isConn.set(value)
+      _      <- ZIO.updateState[WsState](_.copy(isConnected = isConn))
     yield ()
-  /** `isConnected` - get & update */
+  /** `isConnected` - get & set */
 
 
-  /** `channel` - get & update */
+  /** `channel` - get & set */
   protected val getChannel: URIO[SocketEnv, Ref[Option[WsChannel]]] =
     ZIO.getStateWith[WsState](_.channel)
 
-  protected def updateChannel(value: => Option[WsChannel]): URIO[SocketEnv, Unit] =
+  protected def setChannel(value: => Option[WsChannel]): URIO[SocketEnv, Unit] =
     for
-      channel <- getChannel
-      _       <- channel.set(value)
-      _       <- ZIO.updateState[WsState](_.copy(channel = channel))
+      ch <- getChannel
+      _  <- ch.set(value)
+      _  <- ZIO.updateState[WsState](_.copy(channel = ch))
     yield ()
-  /** `channel` - get & update */
+  /** `channel` - get & set */
 
 
   protected def addSub(sub: SubArg): URIO[SocketEnv, Unit] =
