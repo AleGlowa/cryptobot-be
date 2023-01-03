@@ -11,7 +11,7 @@ import zhttp.service.ChannelEvent.{ UserEventTriggered, UserEvent, ExceptionCaug
 import java.net.SocketTimeoutException
 
 import cryptobot.exchange.bybit.MarketType
-import cryptobot.exchange.bybit.ws.WsApp.SocketEnv
+import cryptobot.exchange.bybit.ws.WsApp.{ SocketEnv, Conn }
 import cryptobot.exchange.bybit.ws.models.SubArg
 
 class InverseWsApp extends WsApp:
@@ -25,19 +25,21 @@ class InverseWsApp extends WsApp:
             ZIO.fail(new SocketTimeoutException())
           else
             for
-              _ <- setIsConnected(true)
-              _ <- ZIO.logInfo("Bybit ws connection for inverse market type has been opened")
-              r <- ch.writeAndFlush(WebSocketFrame.text("""{"op": "ping"}"""))
-            yield r
+              _  <- setIsConnected(true)
+              _  <- ZIO.logInfo("Bybit ws connection for inverse market type has been opened")
+              _  <- ch.writeAndFlush(WebSocketFrame.text("""{"op": "ping"}"""))
+            yield ()
 
         case ChannelEvent(ch, ChannelEvent.ChannelRegistered) =>
-          ZIO.logInfo(s"Channel [id=${ch.id}] has been registered") *> setChannel(Some(ch))
+          for
+            _ <- setChannel(Some(ch))
+            _ <- ZIO.logInfo(s"Channel [id=${ch.id}] has been registered")
+          yield ()
 
         case ChannelEvent(ch, ChannelEvent.ChannelUnregistered) =>
           for
-            _ <- setIsConnected(false)
-            _ <- ZIO.logInfo(s"Channel [id=${ch.id}] has been unregistered")
             _ <- setChannel(None)
+            _ <- ZIO.logInfo(s"Channel [id=${ch.id}] has been unregistered")
           yield ()
 
         case ChannelEvent(_, ExceptionCaught(t)) =>
@@ -108,7 +110,7 @@ class InverseWsApp extends WsApp:
         }
     ).toSocketApp
 
-  override def connect(): RIO[SocketEnv, Unit] =
+  override def connect(): URIO[SocketEnv, Conn] =
     (for
       config         <- getConfig
       reconnectsNumR <- Ref.make(0)
@@ -133,6 +135,8 @@ class InverseWsApp extends WsApp:
             .tapOutput(recNum => checkReconnectTries(recNum.toInt - 1, config.reconnectTries))
           )
     yield ())
+      .ensuring(setInitialState)
+      .forkScoped
       .tapDefect ( defect =>
         ZIO.logError(s"Got a defect from inverse socket app: ${defect.dieOption.get}")
       )

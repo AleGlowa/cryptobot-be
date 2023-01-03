@@ -17,7 +17,7 @@ object Dependencies {
 
 object Versions {
 
-  val Zio           = "2.0.2"
+  val Zio           = "2.0.3"
   val ZioJson       = "0.3.0-RC8"
   val ZioConfig     = "3.0.2"
   val ZioHttp       = "2.0.0-RC11"

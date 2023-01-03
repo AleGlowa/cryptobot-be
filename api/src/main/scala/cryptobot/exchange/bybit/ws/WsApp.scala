@@ -8,7 +8,7 @@ import cryptobot.config.WsConfig
 import cryptobot.exchange.bybit.ws.models.SubArg
 
 trait WsApp:
-  import WsApp.{ SocketEnv, WsChannel, WsState }
+  import WsApp.{ SocketEnv, WsChannel, Conn, WsState }
 
   protected val getConfig: URIO[WsConfig, WsConfig] =
     for
@@ -19,21 +19,30 @@ trait WsApp:
 
   protected def msgLogic: SocketApp[SocketEnv]
 
-  def connect()   : RIO[SocketEnv, Unit]
-  def disconnect(): RIO[SocketEnv, Unit] =
+  def connect(): RIO[SocketEnv, Conn]
+  def disconnect(using conn: Conn)(): RIO[SocketEnv, Unit] =
     for
-      ch <- getChannel.flatMap(_.get)
-      _  <- ZIO.when(ch.nonEmpty)(ch.get.close(await = true))
-      _  <- setIsConnected(false)
-      _  <- setChannel(None)
-      _  <- ch.fold(ZIO.unit)(ch => ZIO.logInfo(s"Closing the connection with channel ${ch.id}"))
+      isConn <- getIsConnected.flatMap(_.get)
+      ch     <- getChannel.flatMap(_.get)
+      closeConn =
+        for
+          _ <- ch.get.close(await = true)
+          _ <- conn.interrupt
+          _ <- setIsConnected(false)
+          _ <- ZIO.logInfo(s"Connection [id=${conn.id.id}] has been closed")
+        yield ()
+      _      <- closeConn.when(isConn)
     yield ()
 
   def subscribe(sub: => SubArg)  : RIO[SocketEnv, Unit]
   def unsubscribe(sub: => SubArg): RIO[SocketEnv, Unit]
 
+  protected def setInitialState: URIO[SocketEnv, Unit] =
+    setIsConnected(false) <&> setChannel(None)
+
+
   /** `isConnected` - get & set */
-  protected val getIsConnected: URIO[SocketEnv, Ref[Boolean]] =
+  val getIsConnected: URIO[SocketEnv, Ref[Boolean]] =
     ZIO.getStateWith[WsState](_.isConnected)
 
   protected def setIsConnected(value: => Boolean): URIO[SocketEnv, Unit] =
@@ -70,6 +79,7 @@ object WsApp:
 
   type SocketEnv = EventLoopGroup & (ChannelFactory & Scope) & WsConfig & ZState[WsState]
   type WsChannel = Channel[WebSocketFrame]
+  type Conn      = Fiber.Runtime[Throwable, Unit]
 
   final case class WsState(isConnected: Ref[Boolean], channel: Ref[Option[WsChannel]], subscriptions: Set[SubArg])
   val initialState: ULayer[ZState[WsState]] =
