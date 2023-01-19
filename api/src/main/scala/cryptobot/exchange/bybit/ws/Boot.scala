@@ -1,10 +1,12 @@
 package cryptobot.exchange.bybit.ws
 
-import zio.{ ZIOAppDefault, UIO, ZIO, ExitCode, Console }
+import zio.*
 import zhttp.service.{ EventLoopGroup, ChannelFactory }
 
 import cryptobot.config.Config
-import cryptobot.exchange.bybit.ws.models.{ SubArg, Topic }
+import cryptobot.exchange.bybit.Currency.*
+import cryptobot.exchange.bybit.ws.WsApp.Conn
+import cryptobot.exchange.bybit.ws.models.Topic.InstrumentInfo
 
 object Boot extends ZIOAppDefault:
 
@@ -12,11 +14,15 @@ object Boot extends ZIOAppDefault:
   override def run: UIO[ExitCode] =
     ZIO.scoped(
       for
-        _ <- Console.printLine(s"Starting the application").orDie
-        app = new InverseWsApp
-        _ <- app.connect().forkScoped
-        // Subscribe `instrument_info` topic to get the latest price for ETH/USD pair
-        _ <- app.subscribe(SubArg(Topic.InstrumentInfo, Set("ETHUSD")))
+        _    <- Console.printLine(s"Starting the application").orDie
+        app   = new InverseWsApp
+        given Conn <- app.connect()
+        // Wait ~2 seconds to establish connection in another fork.
+        // Get the latest price for BTC/USD pair
+        lastPrice <- app.getLastPrice(BTC, USD).delay(2.seconds)
+        // Listen `lastPrice` stream for 5 seconds
+        _ <- lastPrice.interruptAfter(5.seconds).foreach(p => ZIO.logInfo(p))
+        _ <- app.disconnect()
         _ <- Console.readLine("Press ENTER to stop the application\n")
         _ <- Console.printLine("Stopping the application...")
       yield ()
