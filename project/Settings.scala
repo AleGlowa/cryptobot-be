@@ -28,8 +28,8 @@ object Settings {
 
   val ApiDependencies =
     ZioHttp ::
+      ZioStreams ::
       ZioJson ::
-      ZioHttpTest ::
       Nil
 
 }

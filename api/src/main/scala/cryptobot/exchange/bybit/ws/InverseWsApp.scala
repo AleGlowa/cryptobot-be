@@ -1,18 +1,23 @@
 package cryptobot.exchange.bybit.ws
 
 import zio.*
+import zio.stream.UStream
 import zio.json.DecoderOps
-import zio.json.ast.{ Json, JsonCursor }
+import zio.json.ast.Json
 import zhttp.http.Http
 import zhttp.socket.{ SocketApp, WebSocketFrame, WebSocketChannelEvent }
-import zhttp.service.{ EventLoopGroup, ChannelFactory, ChannelEvent }
-import zhttp.service.ChannelEvent.{ UserEventTriggered, UserEvent, ExceptionCaught, ChannelRead }
+import zhttp.service.ChannelEvent
+import zhttp.service.ChannelEvent.*
 
 import java.net.SocketTimeoutException
 
-import cryptobot.exchange.bybit.MarketType
+import cryptobot.exchange.bybit.{ MarketType, Currency }
 import cryptobot.exchange.bybit.ws.WsApp.{ SocketEnv, Conn }
-import cryptobot.exchange.bybit.ws.models.SubArg
+import cryptobot.exchange.bybit.ws.models.{ Topic, MsgIn }
+import cryptobot.exchange.bybit.ws.models.Topic.InstrumentInfo
+import cryptobot.exchange.bybit.ws.models.RespType.*
+import cryptobot.exchange.bybit.ws.models.SubRespType.*
+import cryptobot.exchange.bybit.ws.models.Cursors.{ dataCursor, updateCursor }
 
 class InverseWsApp extends WsApp:
 
@@ -46,61 +51,41 @@ class InverseWsApp extends WsApp:
           ZIO.fail(t)
 
         case ChannelEvent(ch, ChannelRead(WebSocketFrame.Text(json))) =>
-          /** Later make more beauty json response handler */
-
-          // Check if json is in valid form
           json.fromJson[Json].fold(
             parseErr => ZIO.fail(new RuntimeException(parseErr)),
             parsed   =>
-              val retCursor    = JsonCursor.field("ret_msg").isString
-              val topicCursor  = JsonCursor.field("topic").isString
-              val resp         = (parsed.get(retCursor) orElse parsed.get(topicCursor)).map(_.value)
-
-              // Check whether we get pong or one of the subscription responses
-              resp match
-                // Pong response
-                case Right("pong") =>
-                  val isSuccessCursor = JsonCursor.field("success").isBool
-                  val isSuccess       = parsed.get(isSuccessCursor).map(_.value)
-
-                  // Check if the pong response is successful
-                  isSuccess.fold(
+              RespDiscriminator.getRespType(parsed) match
+                case Right(Pong) =>
+                  RespDiscriminator.getPongResp(parsed).fold(
                     fieldNotFound => ZIO.fail(new RuntimeException(fieldNotFound)),
-                    isSuccess     =>
-                      if isSuccess then
+                    isSuccessful  =>
+                      if isSuccessful then
                         ZIO.sleep(config.pingInterval) *> ch.writeAndFlush(WebSocketFrame.text("""{"op": "ping"}"""))
                       else
                         ZIO.fail(new RuntimeException("Unseccussful pong response"))
                   )
 
-                // Subscription responses
-                case Right("") =>
+                case Right(SuccessfulSub) =>
                   ZIO.logInfo("Successful subscription")
 
-                case Right("instrument_info.100ms.ETHUSD") =>
-                  val typeCursor = JsonCursor.field("type").isString
-                  val respType   = parsed.get(typeCursor).map(_.value)
-                  respType.fold(
-                    fieldNotFound => ZIO.fail(new RuntimeException(fieldNotFound)),
-                    respType      =>
-                      if respType == "snapshot" then
-                        // Optionaly filter a response, like here with `last_price` field
-                        val lastPriceCursor = JsonCursor.field("data").isObject.field("last_price").isString
-                        val lastPrice = parsed.get(lastPriceCursor).map(_.value)
-                        ZIO.logInfo(s"Last price for ETH is $$${lastPrice.getOrElse(-1)}")
-                      else
-                        // Optionaly filter a response, like here with `last_price` field
-                        val lastPriceCursor =
-                          JsonCursor.field("data").isObject.field("update").isArray.element(0).isObject.field("last_price").isString
-                        val lastPrice = parsed.get(lastPriceCursor)
-                        if lastPrice.isLeft then
-                          ZIO.unit
-                        else
-                          ZIO.logInfo(s"Last price for ETH is $$${lastPrice.map(_.value).getOrElse(-1)}")
-                  )
+                case Right(InstrumentInfoResp(curr1, curr2)) =>
+                  RespDiscriminator.getSubRespType(parsed) match
+                    case Right(Snapshot) =>
+                      parsed.get(dataCursor) match
+                        case Right(data)         => addMsg(MsgIn(data, InstrumentInfo(curr1, curr2)))
+                        case Left(fieldNotFound) => ZIO.fail(new RuntimeException(fieldNotFound))
 
-                case Right(resp) =>
-                  ZIO.fail(new RuntimeException(s"Unseccussful subscription response: $resp"))
+                    case Right(Delta)    =>
+                      parsed.get(updateCursor) match
+                        case Right(update)       => addMsg(MsgIn(update, InstrumentInfo(curr1, curr2)))
+                        case Left(fieldNotFound) => ZIO.fail(new RuntimeException(fieldNotFound))
+
+                    case Left(fieldNotFound) =>
+                      ZIO.fail(new RuntimeException(fieldNotFound))
+
+                case Right(UnsuccessfulSub(err)) =>
+                  ZIO.fail(new RuntimeException(s"Unseccussful subscription response: $err"))
+
                 case Left(fieldNotFound) =>
                   ZIO.fail(new RuntimeException(fieldNotFound))
           )
@@ -141,25 +126,39 @@ class InverseWsApp extends WsApp:
         ZIO.logError(s"Got a defect from inverse socket app: ${defect.dieOption.get}")
       )
 
-  override def subscribe(sub: => SubArg): RIO[SocketEnv, Unit] =
-    for
-      _  <- getIsConnected.repeatUntilZIO(_.get)
-      ch <- getChannel.flatMap(_.get)
-      // Later inspect `None` case
-      _  <- ch.get.writeAndFlush(
-        WebSocketFrame.text(
-          """
-          |{
-          |  "op": "subscribe",
-          |  "args": ["instrument_info.100ms.ETHUSD"]
-          |}""".stripMargin
-        )
-      )
-      // Add a new subscription to the existing set of subscriptions. This change reflects in `WsState`.
-      _ <- addSub(sub)
-    yield ()
+  override def subscribe(topic: => Topic): RIO[SocketEnv, Unit] =
+    ZIO.ifZIO(getIsConnected.flatMap(_.get))(
+      for
+        ch <- getChannel.flatMap(_.get)
+        _  <- ch match
+          case None => ZIO.logInfo("Can't subscribe, because a channel is't registered")
+          case Some(ch) =>
+            ch.writeAndFlush(
+              WebSocketFrame.text(
+                s"""
+                |{
+                |  "op": "subscribe",
+                |  "args": ["${topic.parse}"]
+                |}
+                """.stripMargin
+              ),
+              await = true
+            ) *> addTopic(topic)
+      yield (),
+      ZIO.logInfo("A connection isn't established")
+    )
 
-  override def unsubscribe(sub: => SubArg): RIO[SocketEnv, Unit] = ???
+  override def unsubscribe(topic: => Topic): RIO[SocketEnv, Unit] = ???
+
+  def getLastPrice(curr1: Currency, curr2: Currency): RIO[SocketEnv, UStream[String]] =
+    for
+      _        <- subscribe(InstrumentInfo(curr1, curr2))
+      msgs     <- getInstrumentInfoMsgs
+      lastPrice =
+        msgs
+          .map(json => RespDiscriminator.getLastPriceResp(json, curr1, curr2))
+          .collectRight
+    yield lastPrice
 
   private def checkReconnectTries(reconnectsNum: => Int, reconnectTries: => Int) =
     if reconnectsNum < reconnectTries then
