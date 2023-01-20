@@ -24,16 +24,17 @@ trait WsApp:
   protected def msgLogic: SocketApp[SocketEnv]
 
   def connect(): RIO[SocketEnv, Conn]
-  def disconnect(using conn: Conn)(): RIO[SocketEnv, Unit] =
+  def disconnect(): RIO[SocketEnv, Unit] =
     for
       isConn <- getIsConnected.flatMap(_.get)
+      conn   <- getConn.flatMap(_.get)
       ch     <- getChannel.flatMap(_.get)
       closeConn =
         for
           _ <- ch.get.close(await = true)
-          _ <- conn.interrupt
-          _ <- setIsConnected(false)
-          _ <- ZIO.logInfo(s"Connection [id=${conn.id.id}] has been closed")
+          _ <- conn.get.interrupt
+          _ <- setConn(None) &> setIsConnected(false)
+          _ <- ZIO.logInfo(s"Connection [id=${conn.get.id.id}] has been closed")
         yield ()
       _      <- closeConn.when(isConn)
     yield ()
@@ -42,8 +43,20 @@ trait WsApp:
   protected def unsubscribe(topic: => Topic): RIO[SocketEnv, Unit]
 
   protected def setInitialState: URIO[SocketEnv, Unit] =
-    setIsConnected(false) <&> setChannel(None) <&> clearTopics()
+    setConn(None) <&> setIsConnected(false) <&> setChannel(None) <&> clearTopics()
 
+
+  /** `conn` - get & set */
+  val getConn: URIO[ZState[WsState], Ref[Option[Conn]]] =
+    ZIO.getStateWith[WsState](_.conn)
+
+  protected def setConn(value: => Option[Conn]): URIO[ZState[WsState], Unit] =
+    for
+      conn <- getConn
+      _    <- conn.set(value)
+      _    <- ZIO.updateState[WsState](_.copy(conn = conn))
+    yield ()
+  /** `conn` - get & set */
 
   /** `isConnected` - get & set */
   val getIsConnected: URIO[ZState[WsState], Ref[Boolean]] =
@@ -57,7 +70,6 @@ trait WsApp:
     yield ()
   /** `isConnected` - get & set */
 
-
   /** `channel` - get & set */
   val getChannel: URIO[ZState[WsState], Ref[Option[WsChannel]]] =
     ZIO.getStateWith[WsState](_.channel)
@@ -69,7 +81,6 @@ trait WsApp:
       _  <- ZIO.updateState[WsState](_.copy(channel = ch))
     yield ()
   /** `channel` - get & set */
-
 
   /** `topics` - get, add, delete, clear */
   val getTopics: URIO[ZState[WsState], Ref[Set[Topic]]] =
@@ -97,10 +108,15 @@ trait WsApp:
     yield ()
   /** `topics` - add, delete, clear */
 
-
   /** `subMsgs` - add 
    *    `InstrumentInfo - get
   */
+  protected def addMsg(msg: MsgIn): URIO[ZState[WsState], Unit] =
+    for
+      subMsgs <- ZIO.getStateWith[WsState](_.subMsgs)
+      _       <- subMsgs.setAsync(msg)
+    yield ()
+
   protected val getInstrumentInfoMsgs: URIO[ZState[WsState], UStream[Obj]] =
     for
       subMsgs           <- ZIO.getStateWith[WsState](_.subMsgs)
@@ -111,12 +127,6 @@ trait WsApp:
               case _: InstrumentInfo => msg.obj
           )
     yield instrumentInfoMsgs
-
-  protected def addMsg(msg: MsgIn): URIO[ZState[WsState], Unit] =
-    for
-      subMsgs <- ZIO.getStateWith[WsState](_.subMsgs)
-      _       <- subMsgs.setAsync(msg)
-    yield ()
   /** `subMsgs` - add 
    *    `InstrumentInfo - get
   */
@@ -131,6 +141,7 @@ object WsApp:
   type Conn      = Fiber.Runtime[Throwable, Unit]
 
   final case class WsState(
+    conn       : Ref[Option[Conn]],
     isConnected: Ref[Boolean],
     channel    : Ref[Option[WsChannel]],
     topics     : Ref[Set[Topic]],
@@ -139,11 +150,12 @@ object WsApp:
   val initialState: ULayer[ZState[WsState]] =
     ZLayer(
       for
+        conn        <- Ref.make[Option[Conn]](None)
         isConnected <- Ref.make(false)
         channel     <- Ref.make[Option[WsChannel]](None)
         topics      <- Ref.make(Set.empty[Topic])
         subMsgs     <- SubscriptionRef.make(MsgIn.originMsg)
-      yield WsState(isConnected, channel, topics, subMsgs)
+      yield WsState(conn, isConnected, channel, topics, subMsgs)
     )
     .flatMap(env => ZState.initial(env.get[WsState]))
 
