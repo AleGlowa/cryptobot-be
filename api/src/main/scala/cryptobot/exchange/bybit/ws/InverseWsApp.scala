@@ -101,8 +101,7 @@ class InverseWsApp extends WsApp:
       case ChannelEvent(ch, UserEventTriggered(UserEvent.HandshakeComplete))  =>
         for
           _ <- connect()
-          // Wait ~1 second to establish connection with Bybit API in other fiber
-          _ <- ZIO.sleep(1.second)
+          _ <- getIsConnected.repeat(Schedule.spaced(1.second) && Schedule.recurUntilZIO(_.get))
           _ <- ch.writeAndFlush(WebSocketFrame.text("Connected"))
         yield ()
 
@@ -151,8 +150,8 @@ class InverseWsApp extends WsApp:
         connToRepeat.repeat(
           Schedule.spaced(config.reconnectInterval)
             .zipLeft(Schedule.recurWhile[Int](_ < config.reconnectTries))
-            .tapOutput(recNum => checkReconnectTries(recNum.toInt - 1, config.reconnectTries))
           )
+      _              <- ZIO.die(new RuntimeException("Cumulative reconnection attempts've reached the maximum"))    
     yield ())
       .ensuring(setInitialState)
       .forkScoped
@@ -194,9 +193,3 @@ class InverseWsApp extends WsApp:
           .map(json => RespDiscriminator.getLastPriceResp(json, curr1, curr2))
           .collectRight
     yield lastPrice
-
-  private def checkReconnectTries(reconnectsNum: => Int, reconnectTries: => Int) =
-    if reconnectsNum < reconnectTries then
-      ZIO.die(new RuntimeException("Cumulative reconnection attempts've reached the maximum"))
-    else
-      ZIO.unit
