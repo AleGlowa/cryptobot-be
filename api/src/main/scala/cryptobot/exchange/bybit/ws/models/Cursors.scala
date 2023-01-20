@@ -13,6 +13,8 @@ object Cursors:
   val dataCursor   : JsonCursor[Json, Obj]  = JsonCursor.field("data").isObject
   val updateCursor : JsonCursor[Json, Obj]  = dataCursor.field("update").isArray.element(0).isObject
 
+  val argsCursor: JsonCursor[Json, Str] = JsonCursor.field("request").isObject.field("args").isArray.element(0).isString
+
   val updatedAtCursor: JsonCursor[Json, Str] = JsonCursor.field("updated_at").isString
   val lastPriceCursor: JsonCursor[Json, Str] = JsonCursor.field("last_price").isString
 
