@@ -122,6 +122,7 @@ class InverseWsApp extends WsApp:
     yield ())
       .ensuring(setInitialState)
       .forkScoped
+      .tap(v => setConn(Some(v)))
       .tapDefect ( defect =>
         ZIO.logError(s"Got a defect from inverse socket app: ${defect.dieOption.get}")
       )
