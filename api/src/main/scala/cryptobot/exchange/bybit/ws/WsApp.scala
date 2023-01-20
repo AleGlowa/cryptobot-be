@@ -21,9 +21,10 @@ trait WsApp:
       reconnectTries    <- WsConfig.reconnectTries
     yield WsConfig(reconnectInterval, pingInterval, reconnectTries)
 
-  protected def msgLogic: SocketApp[SocketEnv]
+  protected def msgInLogic: SocketApp[SocketEnv]
+  def msgOutLogic         : SocketApp[SocketEnv]
 
-  def connect(): RIO[SocketEnv, Conn]
+  def connect()   : RIO[SocketEnv, Conn]
   def disconnect(): RIO[SocketEnv, Unit] =
     for
       isConn <- getIsConnected.flatMap(_.get)
