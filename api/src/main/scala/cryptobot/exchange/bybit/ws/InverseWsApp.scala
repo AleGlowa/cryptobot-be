@@ -22,7 +22,7 @@ import cryptobot.exchange.bybit.Currency.*
 
 class InverseWsApp extends WsApp:
 
-  override protected def msgInLogic: SocketApp[SocketEnv] =
+  override protected val msgInLogic: SocketApp[SocketEnv] =
     Http.fromZIO(getConfig).flatMap ( config =>
       Http.collectZIO[WebSocketChannelEvent] {
 
@@ -96,7 +96,7 @@ class InverseWsApp extends WsApp:
         }
     ).toSocketApp
 
-  override def msgOutLogic: SocketApp[SocketEnv] =
+  override val msgOutLogic: SocketApp[SocketEnv] =
     Http.collectZIO[WebSocketChannelEvent] {
       case ChannelEvent(ch, UserEventTriggered(UserEvent.HandshakeComplete))  =>
         for
@@ -153,7 +153,7 @@ class InverseWsApp extends WsApp:
           )
       _              <- ZIO.die(new RuntimeException("Cumulative reconnection attempts've reached the maximum"))    
     yield ())
-      .ensuring(setInitialState)
+      .ensuring(setInitialState())
       .forkScoped
       .tap(v => setConn(Some(v)))
       .tapDefect ( defect =>
