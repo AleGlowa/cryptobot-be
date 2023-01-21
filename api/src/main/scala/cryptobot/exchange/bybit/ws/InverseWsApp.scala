@@ -5,7 +5,7 @@ import zio.stream.UStream
 import zio.json.DecoderOps
 import zio.json.ast.Json
 import zhttp.http.Http
-import zhttp.socket.{ SocketApp, WebSocketFrame, WebSocketChannelEvent }
+import zhttp.socket.*
 import zhttp.service.ChannelEvent
 import zhttp.service.ChannelEvent.*
 
@@ -18,10 +18,11 @@ import cryptobot.exchange.bybit.ws.models.Topic.InstrumentInfo
 import cryptobot.exchange.bybit.ws.models.RespType.*
 import cryptobot.exchange.bybit.ws.models.SubRespType.*
 import cryptobot.exchange.bybit.ws.models.Cursors.{ dataCursor, updateCursor }
+import cryptobot.exchange.bybit.Currency.*
 
 class InverseWsApp extends WsApp:
 
-  override protected def msgLogic: SocketApp[SocketEnv] =
+  override protected val msgInLogic: SocketApp[SocketEnv] =
     Http.fromZIO(getConfig).flatMap ( config =>
       Http.collectZIO[WebSocketChannelEvent] {
 
@@ -95,6 +96,38 @@ class InverseWsApp extends WsApp:
         }
     ).toSocketApp
 
+  override val msgOutLogic: SocketApp[SocketEnv] =
+    Http.collectZIO[WebSocketChannelEvent] {
+      case ChannelEvent(ch, UserEventTriggered(UserEvent.HandshakeComplete))  =>
+        for
+          _ <- connect()
+          _ <- getIsConnected.repeat(Schedule.spaced(1.second) && Schedule.recurUntilZIO(_.get))
+          _ <- ch.writeAndFlush(WebSocketFrame.text("Connected"))
+        yield ()
+
+      // Accept only text messages from frontend. Maybe later make messages require parsable to json
+      case ChannelEvent(ch, ChannelRead(WebSocketFrame.Text(msg)))            =>
+        msg match
+          case "end\n" => disconnect() *> ch.writeAndFlush(WebSocketFrame.text("Disconnected"))
+          case "sub.BTCUSD\n" =>
+            for
+              stream <- getLastPrice(BTC, USD)
+              _      <- stream.runForeach(price => ch.writeAndFlush(WebSocketFrame.text(price)))
+            yield ()
+          case "sub.ETHUSD\n" =>
+            for
+              stream <- getLastPrice(ETH, USD)
+              _      <- stream.runForeach(price => ch.writeAndFlush(WebSocketFrame.text(price)))
+            yield ()
+          case unknown => ch.writeAndFlush(WebSocketFrame.text(s"Unknown subscription: $unknown"))
+
+      case ChannelEvent(_, ExceptionCaught(cause))                            =>
+        Console.printLine(s"Channel ERROR: ${cause.getMessage}")
+    }
+    .toSocketApp
+    .withDecoder(SocketDecoder.default.withExtensions(allowed = true))
+    .withProtocol(SocketProtocol.default.withSubProtocol(Some("json")))
+
   override def connect(): URIO[SocketEnv, Conn] =
     (for
       config         <- getConfig
@@ -103,7 +136,7 @@ class InverseWsApp extends WsApp:
         for
           connP         <- Promise.make[Nothing, Throwable]
           _             <-
-            msgLogic
+            msgInLogic
               .connect(MarketType.InverseWssPath)
               .tap(_ => reconnectsNumR.set(0))
               .catchAll(connP.succeed)
@@ -117,10 +150,10 @@ class InverseWsApp extends WsApp:
         connToRepeat.repeat(
           Schedule.spaced(config.reconnectInterval)
             .zipLeft(Schedule.recurWhile[Int](_ < config.reconnectTries))
-            .tapOutput(recNum => checkReconnectTries(recNum.toInt - 1, config.reconnectTries))
           )
+      _              <- ZIO.die(new RuntimeException("Cumulative reconnection attempts've reached the maximum"))    
     yield ())
-      .ensuring(setInitialState)
+      .ensuring(setInitialState())
       .forkScoped
       .tap(v => setConn(Some(v)))
       .tapDefect ( defect =>
@@ -160,9 +193,3 @@ class InverseWsApp extends WsApp:
           .map(json => RespDiscriminator.getLastPriceResp(json, curr1, curr2))
           .collectRight
     yield lastPrice
-
-  private def checkReconnectTries(reconnectsNum: => Int, reconnectTries: => Int) =
-    if reconnectsNum < reconnectTries then
-      ZIO.die(new RuntimeException("Cumulative reconnection attempts've reached the maximum"))
-    else
-      ZIO.unit

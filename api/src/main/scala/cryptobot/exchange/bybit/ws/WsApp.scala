@@ -21,9 +21,10 @@ trait WsApp:
       reconnectTries    <- WsConfig.reconnectTries
     yield WsConfig(reconnectInterval, pingInterval, reconnectTries)
 
-  protected def msgLogic: SocketApp[SocketEnv]
+  protected val msgInLogic: SocketApp[SocketEnv]
+  val msgOutLogic         : SocketApp[SocketEnv]
 
-  def connect(): RIO[SocketEnv, Conn]
+  def connect()   : RIO[SocketEnv, Conn]
   def disconnect(): RIO[SocketEnv, Unit] =
     for
       isConn <- getIsConnected.flatMap(_.get)
@@ -42,7 +43,7 @@ trait WsApp:
   protected def subscribe(topic: => Topic)  : RIO[SocketEnv, Unit]
   protected def unsubscribe(topic: => Topic): RIO[SocketEnv, Unit]
 
-  protected def setInitialState: URIO[SocketEnv, Unit] =
+  protected def setInitialState(): URIO[SocketEnv, Unit] =
     setConn(None) <&> setIsConnected(false) <&> setChannel(None) <&> clearTopics()
 
 
