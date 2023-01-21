@@ -17,7 +17,7 @@ import cryptobot.exchange.bybit.ws.models.{ Topic, MsgIn }
 import cryptobot.exchange.bybit.ws.models.Topic.InstrumentInfo
 import cryptobot.exchange.bybit.ws.models.RespType.*
 import cryptobot.exchange.bybit.ws.models.SubRespType.*
-import cryptobot.exchange.bybit.ws.models.Cursors.{ dataCursor, updateCursor }
+import cryptobot.exchange.bybit.ws.models.Cursors.{ dataCursor, updateCursor, argsCursor }
 import cryptobot.exchange.bybit.Currency.*
 
 class InverseWsApp extends WsApp:
@@ -67,7 +67,11 @@ class InverseWsApp extends WsApp:
                   )
 
                 case Right(SuccessfulSub) =>
-                  ZIO.logInfo("Successful subscription")
+                  parsed.get(argsCursor)
+                    .fold(
+                      notFound => ZIO.fail(new RuntimeException(notFound)),
+                      sub      => ZIO.logInfo(s"Successful subscription: $sub")
+                    )
 
                 case Right(InstrumentInfoResp(curr1, curr2)) =>
                   RespDiscriminator.getSubRespType(parsed) match
