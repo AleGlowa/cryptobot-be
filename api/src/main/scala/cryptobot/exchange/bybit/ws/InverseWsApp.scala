@@ -105,20 +105,24 @@ class InverseWsApp extends WsApp:
       case ChannelEvent(ch, UserEventTriggered(UserEvent.HandshakeComplete))  =>
         for
           _ <- connect()
-          _ <- getIsConnected.repeat(Schedule.spaced(1.second) && Schedule.recurUntilZIO(_.get))
+          _ <- waitUntilConnEstablished()
           _ <- ch.writeAndFlush(WebSocketFrame.text("Connected"))
         yield ()
 
       // Accept only text messages from frontend. Maybe later make messages require parsable to json
       case ChannelEvent(ch, ChannelRead(WebSocketFrame.Text(msg)))            =>
         msg match
-          case "end\n" => disconnect() *> ch.writeAndFlush(WebSocketFrame.text("Disconnected"))
-          case "sub.BTCUSD\n" =>
+          case "end\n" =>
+            for
+              _ <- ch.writeAndFlush(WebSocketFrame.text("Closing the channel..."))
+              _ <- ch.close(await = true)
+            yield ()
+          case "lastPrice.BTCUSD\n" =>
             for
               stream <- getLastPrice(BTC, USD)
               _      <- stream.runForeach(price => ch.writeAndFlush(WebSocketFrame.text(price)))
             yield ()
-          case "sub.ETHUSD\n" =>
+          case "lastPrice.ETHUSD\n" =>
             for
               stream <- getLastPrice(ETH, USD)
               _      <- stream.runForeach(price => ch.writeAndFlush(WebSocketFrame.text(price)))
@@ -157,7 +161,7 @@ class InverseWsApp extends WsApp:
           )
       _              <- ZIO.die(new RuntimeException("Cumulative reconnection attempts've reached the maximum"))    
     yield ())
-      .ensuring(setInitialState())
+      .ensuring(disconnect())
       .forkScoped
       .tap(v => setConn(Some(v)))
       .tapDefect ( defect =>
@@ -165,33 +169,30 @@ class InverseWsApp extends WsApp:
       )
 
   override def subscribe(topic: => Topic): RIO[SocketEnv, Unit] =
-    ZIO.ifZIO(getIsConnected.flatMap(_.get))(
-      for
-        ch <- getChannel.flatMap(_.get)
-        _  <- ch match
-          case None => ZIO.logInfo("Can't subscribe, because a channel is't registered")
-          case Some(ch) =>
-            ch.writeAndFlush(
-              WebSocketFrame.text(
-                s"""
-                |{
-                |  "op": "subscribe",
-                |  "args": ["${topic.parse}"]
-                |}
-                """.stripMargin
-              ),
-              await = true
-            ) *> addTopic(topic)
-      yield (),
-      ZIO.logInfo("A connection isn't established")
-    )
+    for
+      ch <- getChannel.flatMap(_.get)
+      _  <- ch match
+        case None     => ZIO.logInfo("Can't subscribe, because a channel is't registered")
+        case Some(ch) =>
+          ch.writeAndFlush(
+            WebSocketFrame.text(
+              s"""
+              |{
+              |  "op": "subscribe",
+              |  "args": ["${topic.parse}"]
+              |}
+              """.stripMargin
+            ),
+            await = true
+          ) *> addTopic(topic)
+    yield ()
 
   override def unsubscribe(topic: => Topic): RIO[SocketEnv, Unit] = ???
 
   def getLastPrice(curr1: Currency, curr2: Currency): RIO[SocketEnv, UStream[String]] =
     for
       _        <- subscribe(InstrumentInfo(curr1, curr2))
-      msgs     <- getInstrumentInfoMsgs
+      msgs     <- getMsgs[InstrumentInfo]
       lastPrice =
         msgs
           .map(json => RespDiscriminator.getLastPriceResp(json, curr1, curr2))

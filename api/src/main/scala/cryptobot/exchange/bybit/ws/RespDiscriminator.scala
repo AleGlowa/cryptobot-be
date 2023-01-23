@@ -36,7 +36,7 @@ object RespDiscriminator:
     for
       value <- json.get(lastPriceCursor).map(_.value)
       time  <- json.get(updatedAtCursor).map(_.value)
-    yield s"""{curr1: "$curr1", curr2: "$curr2", value: "$value", time: "$time"}"""
+    yield s"""{curr1: "$curr1", curr2: "$curr2", lastPrice: "$value", time: "$time"}"""
 
   def getSubRespType(json: Json): Either[String, SubRespType] =
     for

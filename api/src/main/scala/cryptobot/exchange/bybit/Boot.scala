@@ -1,4 +1,4 @@
-package cryptobot.exchange.bybit.ws
+package cryptobot.exchange.bybit
 
 import zio.*
 import zhttp.http.*
@@ -7,17 +7,16 @@ import zhttp.service.*
 import zhttp.service.ChannelEvent.*
 
 import cryptobot.config.Config
-import cryptobot.exchange.bybit.Currency.*
-import cryptobot.exchange.bybit.ws.WsApp.Conn
-import cryptobot.exchange.bybit.ws.models.Topic.InstrumentInfo
+import cryptobot.exchange.bybit.ws.{ WsApp, InverseWsApp }
 
 object Boot extends ZIOAppDefault:
 
-  private val inverseWsApp = new InverseWsApp
+  val inverseWsApp = new InverseWsApp
 
   private val app =
     Http.collectZIO[Request] {
-      case Method.GET -> !! / "inverseWs" / "subscriptions" => inverseWsApp.msgOutLogic.toResponse
+      case Method.GET -> !! / "inverseWs" / "subscriptions" =>
+        inverseWsApp.msgOutLogic.toResponse
     }
 
   override val run: UIO[ExitCode] =

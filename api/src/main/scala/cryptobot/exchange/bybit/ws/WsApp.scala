@@ -5,6 +5,7 @@ import zio.stream.{ UStream, SubscriptionRef }
 import zio.json.ast.Json.Obj
 import zhttp.socket.{ SocketApp, WebSocketFrame }
 import zhttp.service.{ EventLoopGroup, ChannelFactory, Channel }
+import scala.reflect.ClassTag
 
 import cryptobot.config.WsConfig
 import cryptobot.exchange.bybit.ws.models.{ Topic, MsgIn }
@@ -25,25 +26,26 @@ trait WsApp:
   val msgOutLogic         : SocketApp[SocketEnv]
 
   def connect()   : RIO[SocketEnv, Conn]
-  def disconnect(): RIO[SocketEnv, Unit] =
+  def disconnect(): URIO[SocketEnv, Unit] =
     for
-      isConn <- getIsConnected.flatMap(_.get)
-      conn   <- getConn.flatMap(_.get)
-      ch     <- getChannel.flatMap(_.get)
+      isConn   <- getIsConnected.flatMap(_.get)
+      conn     <- getConn.flatMap(_.get)
       closeConn =
         for
-          _ <- ch.get.close(await = true)
           _ <- conn.get.interrupt
-          _ <- setConn(None) &> setIsConnected(false)
+          _ <- setInitialState()
           _ <- ZIO.logInfo(s"Connection [id=${conn.get.id.id}] has been closed")
         yield ()
       _      <- closeConn.when(isConn)
     yield ()
 
+  protected def waitUntilConnEstablished(): URIO[ZState[WsState], Unit] =
+    getIsConnected.repeat(Schedule.spaced(1.second) && Schedule.recurUntilZIO(_.get)).ignore
+
   protected def subscribe(topic: => Topic)  : RIO[SocketEnv, Unit]
   protected def unsubscribe(topic: => Topic): RIO[SocketEnv, Unit]
 
-  protected def setInitialState(): URIO[SocketEnv, Unit] =
+  private def setInitialState(): URIO[SocketEnv, Unit] =
     setConn(None) <&> setIsConnected(false) <&> setChannel(None) <&> clearTopics()
 
 
@@ -109,28 +111,24 @@ trait WsApp:
     yield ()
   /** `topics` - add, delete, clear */
 
-  /** `subMsgs` - add 
-   *    `InstrumentInfo - get
-  */
+  /** `subMsgs` - get & add */
   protected def addMsg(msg: MsgIn): URIO[ZState[WsState], Unit] =
     for
       subMsgs <- ZIO.getStateWith[WsState](_.subMsgs)
       _       <- subMsgs.setAsync(msg)
     yield ()
 
-  protected val getInstrumentInfoMsgs: URIO[ZState[WsState], UStream[Obj]] =
+  protected def getMsgs[T <: Topic: ClassTag]: URIO[ZState[WsState], UStream[Obj]] =
     for
-      subMsgs           <- ZIO.getStateWith[WsState](_.subMsgs)
-      instrumentInfoMsgs =
+      subMsgs <- ZIO.getStateWith[WsState](_.subMsgs)
+      msgs     =
         subMsgs.changes
           .collect ( msg =>
             msg.topic match
-              case _: InstrumentInfo => msg.obj
+              case _: T => msg.obj
           )
-    yield instrumentInfoMsgs
-  /** `subMsgs` - add 
-   *    `InstrumentInfo - get
-  */
+    yield msgs
+    /** `subMsgs` - get & add */
 
 end WsApp
 
