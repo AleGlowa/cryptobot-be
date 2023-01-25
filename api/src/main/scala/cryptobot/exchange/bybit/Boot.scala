@@ -11,7 +11,7 @@ import cryptobot.exchange.bybit.ws.{ WsApp, InverseWsApp }
 
 object Boot extends ZIOAppDefault:
 
-  val inverseWsApp = new InverseWsApp
+  private val inverseWsApp = new InverseWsApp
 
   private val app =
     Http.collectZIO[Request] {
