@@ -23,8 +23,8 @@ object Boot extends ZIOAppDefault:
     ZIO.scoped(
       for
         _ <- Console.printLine(s"Starting the server at http://localhost:8080").orDie
-        _ <- Server.start(8080, app).forkScoped
-        _ <- Console.readLine("Press ENTER to stop the application\n").delay(1.second).orDie
+        _ <- Server.start(8080, app)
+        _ <- Console.readLine("Press ENTER to stop the application\n").orDie
         _ <- Console.printLine("Stopping the application...").orDie
       yield ()
     )
