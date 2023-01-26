@@ -110,24 +110,26 @@ class InverseWsApp extends WsApp:
         yield ()
 
       // Accept only text messages from frontend. Maybe later make messages require parsable to json
-      case ChannelEvent(ch, ChannelRead(WebSocketFrame.Text(msg)))            =>
+      case ChannelEvent(chOut, ChannelRead(WebSocketFrame.Text(msg)))            =>
         msg match
           case "end\n" =>
             for
-              _ <- ch.writeAndFlush(WebSocketFrame.text("Closing the channel..."))
-              _ <- ch.close(await = true)
+              _    <- chOut.writeAndFlush(WebSocketFrame.text("Closing the channel..."))
+              chIn <- getChannel.flatMap(_.get)
+              _    <- chIn.get.close(await = true)
+              _    <- chOut.close(await = true)
             yield ()
           case "lastPrice.BTCUSD\n" =>
             for
               stream <- getLastPrice(BTC, USD)
-              _      <- stream.runForeach(price => ch.writeAndFlush(WebSocketFrame.text(price)))
+              _      <- stream.runForeach(price => chOut.writeAndFlush(WebSocketFrame.text(price)))
             yield ()
           case "lastPrice.ETHUSD\n" =>
             for
               stream <- getLastPrice(ETH, USD)
-              _      <- stream.runForeach(price => ch.writeAndFlush(WebSocketFrame.text(price)))
+              _      <- stream.runForeach(price => chOut.writeAndFlush(WebSocketFrame.text(price)))
             yield ()
-          case unknown => ch.writeAndFlush(WebSocketFrame.text(s"Unknown subscription: $unknown"))
+          case unknown => chOut.writeAndFlush(WebSocketFrame.text(s"Unknown subscription: $unknown"))
 
       case ChannelEvent(_, ExceptionCaught(cause))                            =>
         Console.printLine(s"Channel ERROR: ${cause.getMessage}")
