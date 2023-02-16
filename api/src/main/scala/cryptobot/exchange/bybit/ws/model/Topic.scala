@@ -1,4 +1,4 @@
-package cryptobot.exchange.bybit.ws.models
+package cryptobot.exchange.bybit.ws.model
 
 import cryptobot.exchange.bybit.Currency
 

@@ -1,4 +1,4 @@
-package cryptobot.exchange.bybit.ws.models
+package cryptobot.exchange.bybit.ws
 
 import zio.json.ast.JsonCursor
 import zio.json.ast.Json

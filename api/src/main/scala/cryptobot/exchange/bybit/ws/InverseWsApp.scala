@@ -2,7 +2,7 @@ package cryptobot.exchange.bybit.ws
 
 import zio.*
 import zio.stream.UStream
-import zio.json.DecoderOps
+import zio.json.{ EncoderOps, DecoderOps }
 import zio.json.ast.Json
 import zhttp.http.Http
 import zhttp.socket.*
@@ -13,12 +13,15 @@ import java.net.SocketTimeoutException
 
 import cryptobot.exchange.bybit.{ MarketType, Currency }
 import cryptobot.exchange.bybit.ws.WsApp.{ SocketEnv, Conn }
-import cryptobot.exchange.bybit.ws.models.{ Topic, MsgIn }
-import cryptobot.exchange.bybit.ws.models.Topic.InstrumentInfo
-import cryptobot.exchange.bybit.ws.models.RespType.*
-import cryptobot.exchange.bybit.ws.models.SubRespType.*
-import cryptobot.exchange.bybit.ws.models.Cursors.{ dataCursor, updateCursor, argsCursor }
+import cryptobot.exchange.bybit.ws.model.{ Topic, MsgIn }
+import cryptobot.exchange.bybit.ws.model.Topic.InstrumentInfo
+import cryptobot.exchange.bybit.ws.model.RespType.*
+import cryptobot.exchange.bybit.ws.model.SubRespType.*
+import cryptobot.exchange.bybit.ws.Cursors.{ dataCursor, updateCursor, argsCursor }
 import cryptobot.exchange.bybit.Currency.*
+import cryptobot.exchange.bybit.ws.Cursors
+import cryptobot.exchange.bybit.ws.response.LastPriceResp
+import cryptobot.exchange.bybit.ws.Codecs.given
 
 class InverseWsApp extends WsApp:
 
@@ -122,12 +125,12 @@ class InverseWsApp extends WsApp:
           case "lastPrice.BTCUSD\n" =>
             for
               stream <- getLastPrice(BTC, USD)
-              _      <- stream.runForeach(price => chOut.writeAndFlush(WebSocketFrame.text(price)))
+              _      <- stream.runForeach(r => chOut.writeAndFlush(WebSocketFrame.text(r.toJson)))
             yield ()
           case "lastPrice.ETHUSD\n" =>
             for
               stream <- getLastPrice(ETH, USD)
-              _      <- stream.runForeach(price => chOut.writeAndFlush(WebSocketFrame.text(price)))
+              _      <- stream.runForeach(r => chOut.writeAndFlush(WebSocketFrame.text(r.toJson)))
             yield ()
           case unknown => chOut.writeAndFlush(WebSocketFrame.text(s"Unknown subscription: $unknown"))
 
@@ -191,7 +194,7 @@ class InverseWsApp extends WsApp:
 
   override def unsubscribe(topic: => Topic): RIO[SocketEnv, Unit] = ???
 
-  def getLastPrice(curr1: Currency, curr2: Currency): RIO[SocketEnv, UStream[String]] =
+  def getLastPrice(curr1: Currency, curr2: Currency): RIO[SocketEnv, UStream[LastPriceResp]] =
     for
       _        <- subscribe(InstrumentInfo(curr1, curr2))
       msgs     <- getMsgs[InstrumentInfo]

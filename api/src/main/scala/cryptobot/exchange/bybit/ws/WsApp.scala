@@ -8,9 +8,9 @@ import zhttp.service.{ EventLoopGroup, ChannelFactory, Channel }
 import scala.reflect.ClassTag
 
 import cryptobot.config.WsConfig
-import cryptobot.exchange.bybit.ws.models.{ Topic, MsgIn }
-import cryptobot.exchange.bybit.ws.models.RespType.InstrumentInfoResp
-import cryptobot.exchange.bybit.ws.models.Topic.InstrumentInfo
+import cryptobot.exchange.bybit.ws.model.{ Topic, MsgIn }
+import cryptobot.exchange.bybit.ws.model.RespType.InstrumentInfoResp
+import cryptobot.exchange.bybit.ws.model.Topic.InstrumentInfo
 
 trait WsApp:
   import WsApp.{ SocketEnv, WsChannel, Conn, WsState }

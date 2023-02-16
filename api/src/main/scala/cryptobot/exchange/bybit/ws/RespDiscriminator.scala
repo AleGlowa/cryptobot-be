@@ -1,12 +1,15 @@
 package cryptobot.exchange.bybit.ws
 
 import zio.json.ast.Json
+import java.time.Instant
 
 import cryptobot.exchange.bybit.{ Currency, currPairs }
-import cryptobot.exchange.bybit.ws.models.{ RespType, SubRespType }
-import cryptobot.exchange.bybit.ws.models.RespType.*
-import cryptobot.exchange.bybit.ws.models.SubRespType.*
-import cryptobot.exchange.bybit.ws.models.Cursors.*
+import cryptobot.exchange.bybit.ws.model.{ RespType, SubRespType }
+import cryptobot.exchange.bybit.ws.model.RespType.*
+import cryptobot.exchange.bybit.ws.model.SubRespType.*
+import cryptobot.exchange.bybit.ws.Cursors.*
+import cryptobot.exchange.bybit.ws.Cursors
+import cryptobot.exchange.bybit.ws.response.LastPriceResp
 
 object RespDiscriminator:
 
@@ -32,11 +35,11 @@ object RespDiscriminator:
     json : Json,
     curr1: Currency,
     curr2: Currency
-  ): Either[String, String] =
+  ): Either[String, LastPriceResp] =
     for
       value <- json.get(lastPriceCursor).map(_.value)
       time  <- json.get(updatedAtCursor).map(_.value)
-    yield s"""{curr1: "$curr1", curr2: "$curr2", lastPrice: "$value", time: "$time"}"""
+    yield LastPriceResp(curr1, curr2, value, Instant.parse(time))
 
   def getSubRespType(json: Json): Either[String, SubRespType] =
     for
