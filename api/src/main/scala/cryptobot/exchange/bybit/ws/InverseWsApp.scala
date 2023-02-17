@@ -20,8 +20,9 @@ import cryptobot.exchange.bybit.ws.model.SubRespType.*
 import cryptobot.exchange.bybit.ws.Cursors.{ dataCursor, updateCursor, argsCursor }
 import cryptobot.exchange.bybit.Currency.*
 import cryptobot.exchange.bybit.ws.Cursors
-import cryptobot.exchange.bybit.ws.response.LastPriceResp
 import cryptobot.exchange.bybit.ws.Codecs.given
+import cryptobot.exchange.bybit.ws.response.LastPriceResp
+import cryptobot.exchange.bybit.ws.request.sub.LastPriceSub
 
 class InverseWsApp extends WsApp:
 
@@ -109,30 +110,19 @@ class InverseWsApp extends WsApp:
         for
           _ <- connect()
           _ <- waitUntilConnEstablished()
-          _ <- ch.writeAndFlush(WebSocketFrame.text("Connected"))
+          _ <- ch.writeAndFlush(WebSocketFrame.text("""{"conn": true}"""))
         yield ()
 
       // Accept only text messages from frontend. Maybe later make messages require parsable to json
-      case ChannelEvent(chOut, ChannelRead(WebSocketFrame.Text(msg)))            =>
-        msg match
-          case "end\n" =>
+      case ChannelEvent(ch, ChannelRead(WebSocketFrame.Text(json)))            =>
+        json.fromJson[LastPriceSub] match
+          case Left(unknown) =>
+            ch.writeAndFlush(WebSocketFrame.text(s"""{"err": "Subscription unknown: $unknown"}"""))
+          case Right(LastPriceSub(_, _, curr1, curr2)) =>
             for
-              _    <- chOut.writeAndFlush(WebSocketFrame.text("Closing the channel..."))
-              chIn <- getChannel.flatMap(_.get)
-              _    <- chIn.get.close(await = true)
-              _    <- chOut.close(await = true)
+              stream <- getLastPrice(curr1, curr2)
+              _      <- stream.runForeach(r => ch.writeAndFlush(WebSocketFrame.text(r.toJson)))
             yield ()
-          case "lastPrice.BTCUSD\n" =>
-            for
-              stream <- getLastPrice(BTC, USD)
-              _      <- stream.runForeach(r => chOut.writeAndFlush(WebSocketFrame.text(r.toJson)))
-            yield ()
-          case "lastPrice.ETHUSD\n" =>
-            for
-              stream <- getLastPrice(ETH, USD)
-              _      <- stream.runForeach(r => chOut.writeAndFlush(WebSocketFrame.text(r.toJson)))
-            yield ()
-          case unknown => chOut.writeAndFlush(WebSocketFrame.text(s"Unknown subscription: $unknown"))
 
       case ChannelEvent(_, ExceptionCaught(cause))                            =>
         Console.printLine(s"Channel ERROR: ${cause.getMessage}")
