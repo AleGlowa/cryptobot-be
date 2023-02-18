@@ -113,7 +113,6 @@ class InverseWsApp extends WsApp:
           _ <- ch.writeAndFlush(WebSocketFrame.text("""{"conn": true}"""))
         yield ()
 
-      // Accept only text messages from frontend. Maybe later make messages require parsable to json
       case ChannelEvent(ch, ChannelRead(WebSocketFrame.Text(json)))            =>
         json.fromJson[LastPriceSub] match
           case Left(unknown) =>
