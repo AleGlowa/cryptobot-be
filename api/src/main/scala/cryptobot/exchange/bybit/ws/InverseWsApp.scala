@@ -12,6 +12,7 @@ import zhttp.service.ChannelEvent.*
 import java.net.SocketTimeoutException
 
 import cryptobot.exchange.bybit.{ MarketType, Currency }
+import cryptobot.exchange.bybit.Extensions.*
 import cryptobot.exchange.bybit.ws.WsApp.{ SocketEnv, Conn }
 import cryptobot.exchange.bybit.ws.model.{ Topic, MsgIn }
 import cryptobot.exchange.bybit.ws.model.Topic.InstrumentInfo
@@ -21,7 +22,7 @@ import cryptobot.exchange.bybit.ws.Cursors.{ dataCursor, updateCursor, argsCurso
 import cryptobot.exchange.bybit.Currency.*
 import cryptobot.exchange.bybit.ws.Cursors
 import cryptobot.exchange.bybit.ws.Codecs.given
-import cryptobot.exchange.bybit.ws.response.LastPriceResp
+import cryptobot.exchange.bybit.ws.response.*
 import cryptobot.exchange.bybit.ws.request.sub.LastPriceSub
 import cryptobot.exchange.bybit.ws.request.unsub.LastPriceUnsub
 
@@ -38,7 +39,7 @@ class InverseWsApp extends WsApp:
             for
               _  <- setIsConnected(true)
               _  <- ZIO.logInfo("Bybit ws connection for inverse market type has been opened")
-              _  <- ch.writeAndFlush(WebSocketFrame.text("""{"op": "ping"}"""))
+              _  <- ch.sendPing()
             yield ()
 
         case ChannelEvent(ch, ChannelEvent.ChannelRegistered) =>
@@ -66,7 +67,7 @@ class InverseWsApp extends WsApp:
                     fieldNotFound => ZIO.fail(new RuntimeException(fieldNotFound)),
                     isSuccessful  =>
                       if isSuccessful then
-                        ZIO.sleep(config.pingInterval) *> ch.writeAndFlush(WebSocketFrame.text("""{"op": "ping"}"""))
+                        ZIO.sleep(config.pingInterval) *> ch.sendPing()
                       else
                         ZIO.fail(new RuntimeException("Unseccussful pong response"))
                   )
@@ -118,22 +119,22 @@ class InverseWsApp extends WsApp:
         for
           _ <- connect()
           _ <- waitUntilConnEstablished()
-          _ <- ch.writeAndFlush(WebSocketFrame.text("""{"conn": true}"""))
+          _ <- ch.sendJson(IsConnResp(true))
         yield ()
 
       case ChannelEvent(ch, ChannelRead(WebSocketFrame.Text(json)))            =>
         json.fromJson[LastPriceSub] orElse json.fromJson[LastPriceUnsub] match
           case Left(unknown) =>
-            ch.writeAndFlush(WebSocketFrame.text(s"""{"err": "Unknown request ($unknown)"}"""))
+            ch.sendJson(s"""{err: "Unknown request ($unknown)"}""")
           case Right(LastPriceSub(_, _, curr1, curr2)) =>
             for
               stream <- getLastPrice(curr1, curr2)
-              _      <- stream.runForeach(r => ch.writeAndFlush(WebSocketFrame.text(r.toJson)))
+              _      <- stream.runForeach(r => ch.sendJson(r))
             yield ()
           case Right(LastPriceUnsub(_, e, curr1, curr2)) =>
             for
               _ <- unsubLastPrice(curr1, curr2)
-              _ <- ch.writeAndFlush(WebSocketFrame.text(s"""{"unsub": true, "event": "$e", "args": ["$curr1", "$curr2"]}"""))
+              _ <- ch.sendJson(UnsubResp(true, e, List(curr1, curr2)))
             yield ()
 
       case ChannelEvent(_, ExceptionCaught(cause))                            =>
@@ -181,17 +182,7 @@ class InverseWsApp extends WsApp:
       _  <- ch match
         case None     => ZIO.logInfo("Can't subscribe, because a channel isn't registered")
         case Some(ch) =>
-          ch.writeAndFlush(
-            WebSocketFrame.text(
-              s"""
-              |{
-              |  "op": "subscribe",
-              |  "args": ["${topic.parse}"]
-              |}
-              """.stripMargin
-            ),
-            await = true
-          ) *> addTopic(topic)
+          ch.sendToBybit("subscribe", topic.parse) *> addTopic(topic)
     yield ()
 
   override def unsubscribe(topic: => Topic): RIO[SocketEnv, Unit] =
@@ -200,17 +191,7 @@ class InverseWsApp extends WsApp:
       _  <- ch match
         case None     => ZIO.logInfo("Can't unsubscribe, because a channel isn't registered")
         case Some(ch) =>
-          ch.writeAndFlush(
-            WebSocketFrame.text(
-              s"""
-              |{
-              |  "op": "unsubscribe",
-              |  "args": ["${topic.parse}"]
-              |}
-              """.stripMargin
-            ),
-            await = true
-          ) *> deleteTopic(topic)
+          ch.sendToBybit("unsubscribe", topic.parse) *> deleteTopic(topic)
     yield ()
 
   def getLastPrice(curr1: Currency, curr2: Currency): RIO[SocketEnv, UStream[LastPriceResp]] =
