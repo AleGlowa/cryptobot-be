@@ -4,7 +4,7 @@ import zio.json.*
 import scala.util.Try
 
 import cryptobot.exchange.bybit.Currency
-import cryptobot.exchange.bybit.ws.response.LastPriceResp
+import cryptobot.exchange.bybit.ws.response.*
 import cryptobot.exchange.bybit.ws.request.sub.LastPriceSub
 import cryptobot.exchange.bybit.ws.request.unsub.LastPriceUnsub
 
@@ -15,6 +15,8 @@ object Codecs:
     _.toString
   )
 
+  given JsonEncoder[IsConnResp] = DeriveJsonEncoder.gen
+  given JsonEncoder[UnsubResp] = DeriveJsonEncoder.gen
   given JsonEncoder[LastPriceResp] = DeriveJsonEncoder.gen
   given JsonDecoder[LastPriceSub] = DeriveJsonDecoder.gen[LastPriceSub].mapOrFail ( s =>
     Either.cond(s.op == "subscribe" && s.event == "lastPrice", s, "Sub lastPrice: wrong syntax")
