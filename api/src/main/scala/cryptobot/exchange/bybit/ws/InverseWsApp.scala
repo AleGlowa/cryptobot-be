@@ -23,6 +23,7 @@ import cryptobot.exchange.bybit.ws.Cursors
 import cryptobot.exchange.bybit.ws.Codecs.given
 import cryptobot.exchange.bybit.ws.response.LastPriceResp
 import cryptobot.exchange.bybit.ws.request.sub.LastPriceSub
+import cryptobot.exchange.bybit.ws.request.unsub.LastPriceUnsub
 
 class InverseWsApp extends WsApp:
 
@@ -77,6 +78,13 @@ class InverseWsApp extends WsApp:
                       sub      => ZIO.logInfo(s"Successful subscription: $sub")
                     )
 
+                case Right(SuccessfulUnsub) =>
+                  parsed.get(argsCursor)
+                    .fold(
+                      notFound => ZIO.fail(new RuntimeException(notFound)),
+                      unsub    => ZIO.logInfo(s"Successful unsubscription: $unsub")
+                    )
+
                 case Right(InstrumentInfoResp(curr1, curr2)) =>
                   RespDiscriminator.getSubRespType(parsed) match
                     case Right(Snapshot) =>
@@ -114,13 +122,18 @@ class InverseWsApp extends WsApp:
         yield ()
 
       case ChannelEvent(ch, ChannelRead(WebSocketFrame.Text(json)))            =>
-        json.fromJson[LastPriceSub] match
+        json.fromJson[LastPriceSub] orElse json.fromJson[LastPriceUnsub] match
           case Left(unknown) =>
-            ch.writeAndFlush(WebSocketFrame.text(s"""{"err": "Subscription unknown: $unknown"}"""))
+            ch.writeAndFlush(WebSocketFrame.text(s"""{"err": "Unknown request ($unknown)"}"""))
           case Right(LastPriceSub(_, _, curr1, curr2)) =>
             for
               stream <- getLastPrice(curr1, curr2)
               _      <- stream.runForeach(r => ch.writeAndFlush(WebSocketFrame.text(r.toJson)))
+            yield ()
+          case Right(LastPriceUnsub(_, e, curr1, curr2)) =>
+            for
+              _ <- unsubLastPrice(curr1, curr2)
+              _ <- ch.writeAndFlush(WebSocketFrame.text(s"""{"unsub": true, "event": "$e", "args": ["$curr1", "$curr2"]}"""))
             yield ()
 
       case ChannelEvent(_, ExceptionCaught(cause))                            =>
@@ -166,7 +179,7 @@ class InverseWsApp extends WsApp:
     for
       ch <- getChannel.flatMap(_.get)
       _  <- ch match
-        case None     => ZIO.logInfo("Can't subscribe, because a channel is't registered")
+        case None     => ZIO.logInfo("Can't subscribe, because a channel isn't registered")
         case Some(ch) =>
           ch.writeAndFlush(
             WebSocketFrame.text(
@@ -181,7 +194,24 @@ class InverseWsApp extends WsApp:
           ) *> addTopic(topic)
     yield ()
 
-  override def unsubscribe(topic: => Topic): RIO[SocketEnv, Unit] = ???
+  override def unsubscribe(topic: => Topic): RIO[SocketEnv, Unit] =
+    for
+      ch <- getChannel.flatMap(_.get)
+      _  <- ch match
+        case None     => ZIO.logInfo("Can't unsubscribe, because a channel isn't registered")
+        case Some(ch) =>
+          ch.writeAndFlush(
+            WebSocketFrame.text(
+              s"""
+              |{
+              |  "op": "unsubscribe",
+              |  "args": ["${topic.parse}"]
+              |}
+              """.stripMargin
+            ),
+            await = true
+          ) *> deleteTopic(topic)
+    yield ()
 
   def getLastPrice(curr1: Currency, curr2: Currency): RIO[SocketEnv, UStream[LastPriceResp]] =
     for
@@ -192,3 +222,6 @@ class InverseWsApp extends WsApp:
           .map(json => RespDiscriminator.getLastPriceResp(json, curr1, curr2))
           .collectRight
     yield lastPrice
+
+  def unsubLastPrice(curr1: Currency, curr2: Currency): RIO[SocketEnv, Unit] =
+    unsubscribe(InstrumentInfo(curr1, curr2))
