@@ -17,11 +17,12 @@ object RespDiscriminator:
 
   def getRespType(json: Json): Either[String, RespType] =
     for
-      raw      <- json.get(retMsgCursor) orElse json.get(topicCursor)
+      raw      <- json.get(opCursor) orElse json.get(topicCursor)
       respType  =
         raw.value match
-          case "pong"                      => Pong
-          case ""                          => SuccessfulSub
+          case "ping"                      => Pong
+          case "unsubscribe"               => SuccessfulUnsub
+          case "subscribe"                 => SuccessfulSub
           case instrumentalInfoRegex(pair) =>
             val dPair = currPairs(pair)
             InstrumentInfoResp(dPair(0), dPair(1))
