@@ -19,8 +19,6 @@ import cryptobot.exchange.bybit.ws.model.Topic.InstrumentInfo
 import cryptobot.exchange.bybit.ws.model.RespType.*
 import cryptobot.exchange.bybit.ws.model.SubRespType.*
 import cryptobot.exchange.bybit.ws.Cursors.{ dataCursor, updateCursor, argsCursor }
-import cryptobot.exchange.bybit.Currency.*
-import cryptobot.exchange.bybit.ws.Cursors
 import cryptobot.exchange.bybit.ws.Codecs.given
 import cryptobot.exchange.bybit.ws.response.*
 import cryptobot.exchange.bybit.ws.request.sub.LastPriceSub
@@ -177,32 +175,41 @@ class InverseWsApp extends WsApp:
       )
 
   override def subscribe(topic: => Topic): RIO[SocketEnv, Unit] =
-    for
-      ch <- getChannel.flatMap(_.get)
-      _  <- ch match
-        case None     => ZIO.logInfo("Can't subscribe, because a channel isn't registered")
-        case Some(ch) =>
-          ch.sendToBybit("subscribe", topic.parse) *> addTopic(topic)
-    yield ()
+    val isTopic =
+      for
+       topics <- getTopics.flatMap(_.get)
+      yield topics.contains(topic)
+
+    ZIO.ifZIO(isTopic)(
+      ZIO.logInfo(s"The topic $topic is already subscribed"),
+      for
+        ch <- getChannel.flatMap(_.get)
+        _  <- ch match
+          case None     =>
+            ZIO.logInfo("Can't subscribe, because a channel isn't registered")
+          case Some(ch) =>
+            ch.sendToBybit("subscribe", topic.parse) *> addTopic(topic)
+      yield ()
+    )
 
   override def unsubscribe(topic: => Topic): RIO[SocketEnv, Unit] =
     for
       ch <- getChannel.flatMap(_.get)
       _  <- ch match
-        case None     => ZIO.logInfo("Can't unsubscribe, because a channel isn't registered")
+        case None     =>
+          ZIO.logInfo("Can't unsubscribe, because a channel isn't registered")
         case Some(ch) =>
           ch.sendToBybit("unsubscribe", topic.parse) *> deleteTopic(topic)
     yield ()
 
-  def getLastPrice(curr1: Currency, curr2: Currency): RIO[SocketEnv, UStream[LastPriceResp]] =
+  def getLastPrice(curr1: => Currency, curr2: => Currency): RIO[SocketEnv, UStream[LastPriceResp]] =
     for
       _        <- subscribe(InstrumentInfo(curr1, curr2))
-      msgs     <- getMsgs[InstrumentInfo]
       lastPrice =
-        msgs
+        getMsgs(curr1, curr2)
           .map(json => RespDiscriminator.getLastPriceResp(json, curr1, curr2))
           .collectRight
     yield lastPrice
 
-  def unsubLastPrice(curr1: Currency, curr2: Currency): RIO[SocketEnv, Unit] =
+  def unsubLastPrice(curr1: => Currency, curr2: => Currency): RIO[SocketEnv, Unit] =
     unsubscribe(InstrumentInfo(curr1, curr2))

@@ -20,7 +20,7 @@ object Extensions:
 
   extension (ch: Channel[WebSocketFrame])
     def sendJson[A](parsable: A, await: Boolean = false)(using JsonEncoder[A]): Task[Unit] =
-      ch.writeAndFlush(WebSocketFrame.text(parsable.toJson))
+      ch.writeAndFlush(WebSocketFrame.text(parsable.toJson), await)
 
     def sendPing(): Task[Unit] =
       ch.writeAndFlush(WebSocketFrame.text("""{"op": "ping"}"""))

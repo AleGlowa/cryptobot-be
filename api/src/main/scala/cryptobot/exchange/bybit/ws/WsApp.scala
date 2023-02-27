@@ -1,19 +1,21 @@
 package cryptobot.exchange.bybit.ws
 
 import zio.*
-import zio.stream.{ UStream, SubscriptionRef }
+import zio.stream.{ ZStream, UStream }
 import zio.json.ast.Json.Obj
 import zhttp.socket.{ SocketApp, WebSocketFrame }
 import zhttp.service.{ EventLoopGroup, ChannelFactory, Channel }
-import scala.reflect.ClassTag
+import scala.collection.mutable.{ Map => MutMap }
 
 import cryptobot.config.WsConfig
+import cryptobot.exchange.bybit.Currency
 import cryptobot.exchange.bybit.ws.model.{ Topic, MsgIn }
-import cryptobot.exchange.bybit.ws.model.RespType.InstrumentInfoResp
 import cryptobot.exchange.bybit.ws.model.Topic.InstrumentInfo
 
 trait WsApp:
-  import WsApp.{ SocketEnv, WsChannel, Conn, WsState }
+  import WsApp.{ SocketEnv, WsChannel, Conn, Subs, WsState }
+
+  protected val subs: Subs = MutMap.empty
 
   protected val getConfig: URIO[WsConfig, WsConfig] =
     for
@@ -111,24 +113,23 @@ trait WsApp:
     yield ()
   /** `topics` - add, delete, clear */
 
-  /** `subMsgs` - get & add */
-  protected def addMsg(msg: MsgIn): URIO[ZState[WsState], Unit] =
-    for
-      subMsgs <- ZIO.getStateWith[WsState](_.subMsgs)
-      _       <- subMsgs.setAsync(msg)
-    yield ()
+  protected def addMsg(msg: => MsgIn): UIO[Unit] = msg.topic match
+    case InstrumentInfo(curr1, curr2) =>
+      val pair = (curr1, curr2)
+      val hub = subs.get(pair)
 
-  protected def getMsgs[T <: Topic: ClassTag]: URIO[ZState[WsState], UStream[Obj]] =
-    for
-      subMsgs <- ZIO.getStateWith[WsState](_.subMsgs)
-      msgs     =
-        subMsgs.changes
-          .collect ( msg =>
-            msg.topic match
-              case _: T => msg.obj
-          )
-    yield msgs
-    /** `subMsgs` - get & add */
+      (for
+        newHub <- ZIO.when(hub.isEmpty)(
+          for
+            hub <- Hub.sliding[Obj](64)
+            _    = subs += pair -> hub
+          yield hub
+        )
+        _      <- hub.orElse(newHub).get.publish(msg.obj)
+      yield ()).ignore
+
+  protected def getMsgs(curr1: Currency, curr2: Currency): UStream[Obj] =
+    ZStream.fromHub(subs((curr1, curr2)))
 
 end WsApp
 
@@ -138,13 +139,13 @@ object WsApp:
   type SocketEnv = EventLoopGroup & (ChannelFactory & Scope) & WsConfig & ZState[WsState]
   type WsChannel = Channel[WebSocketFrame]
   type Conn      = Fiber.Runtime[Throwable, Unit]
+  type Subs      = MutMap[(Currency, Currency), Hub[Obj]]
 
   final case class WsState(
     conn       : Ref[Option[Conn]],
     isConnected: Ref[Boolean],
     channel    : Ref[Option[WsChannel]],
     topics     : Ref[Set[Topic]],
-    subMsgs    : SubscriptionRef[MsgIn]
   )
   val initialState: ULayer[ZState[WsState]] =
     ZLayer(
@@ -153,8 +154,7 @@ object WsApp:
         isConnected <- Ref.make(false)
         channel     <- Ref.make[Option[WsChannel]](None)
         topics      <- Ref.make(Set.empty[Topic])
-        subMsgs     <- SubscriptionRef.make(MsgIn.originMsg)
-      yield WsState(conn, isConnected, channel, topics, subMsgs)
+      yield WsState(conn, isConnected, channel, topics)
     )
     .flatMap(env => ZState.initial(env.get[WsState]))
 
