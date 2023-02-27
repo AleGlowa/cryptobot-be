@@ -115,9 +115,9 @@ class InverseWsApp extends WsApp:
     Http.collectZIO[WebSocketChannelEvent] {
       case ChannelEvent(ch, UserEventTriggered(UserEvent.HandshakeComplete))  =>
         for
-          _ <- connect()
-          _ <- waitUntilConnEstablished()
-          _ <- ch.sendJson(IsConnResp(true))
+          isConn <- getIsConnected.flatMap(_.get)
+          _      <- ZIO.when(!isConn)(connect() *> waitUntilConnEstablished())
+          _      <- ch.sendJson(IsConnResp(true))
         yield ()
 
       case ChannelEvent(ch, ChannelRead(WebSocketFrame.Text(json)))            =>
