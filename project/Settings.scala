@@ -1,5 +1,6 @@
 import sbt._
 import sbt.Keys._
+import sbtassembly.AssemblyKeys._
 
 import Dependencies._
 
@@ -15,6 +16,12 @@ object Settings {
         ),
       run / cancelable := true,  // https://github.com/sbt/sbt/issues/2274
       testFrameworks   := Seq(new TestFramework("zio.test.sbt.ZTestFramework"))
+    )
+
+  val ApiSettings =
+    Seq(
+      assembly / mainClass := Some("cryptobot.exchange.bybit.Boot"),
+      assembly / assemblyJarName := "cryptobot-api.jar"
     )
 
   val CoreDependencies =
